@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartStudy RAG Assistant – Upload</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="header-inner">
+            <span class="logo">📚 SmartStudy RAG Assistant</span>
+            <button class="theme-toggle" id="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="card">
+            <h1>Upload Study Material</h1>
+            <p class="subtitle">Add a PDF to your knowledge base and start asking questions.</p>
+
+            <form id="upload-form" onsubmit="handleUpload(event)" enctype="multipart/form-data">
+                <label for="subject">Subject</label>
+                <select id="subject" name="subject" onchange="toggleCustomSubject(this)">
+                    <!-- Populated by JS -->
+                </select>
+
+                <div id="custom-subject-container" style="display:none;">
+                    <label id="custom-subject-label" for="custom-subject">New Subject Name</label>
+                    <input type="text" id="custom-subject" aria-labelledby="custom-subject-label" placeholder="e.g., Biology">
+                </div>
+
+                <label for="file">PDF Document</label>
+                <input type="file" id="file" name="file" accept="application/pdf">
+
+                <!-- Progress bar -->
+                <div id="progress-container" class="progress-container" aria-hidden="true">
+                    <div id="progress-bar" class="progress-bar"></div>
+                </div>
+
+                <!-- Status Messages -->
+                <div id="upload-status" class="status-message" role="status" aria-live="polite"></div>
+
+                <button type="submit" id="submit-btn">
+                    <span id="btn-text">Upload Document</span>
+                </button>
+            </form>
+
+            <button class="secondary" onclick="window.location.href='/query'">
+                Go to Query Page &rarr;
+            </button>
+        </div>
+    </div>
+
+    <footer class="site-footer">
+        <p>Built with FastAPI · Groq · ChromaDB · HuggingFace · LangChain</p>
+    </footer>
+
+    <script>
+        // ── Theme toggle ──────────────────────────────────────────────
+        const themeToggle = document.getElementById("theme-toggle");
+        const savedTheme = localStorage.getItem("theme") || "light";
+        document.documentElement.setAttribute("data-theme", savedTheme);
+        themeToggle.textContent = savedTheme === "dark" ? "☀️" : "🌙";
+
+        themeToggle.addEventListener("click", () => {
+            const current = document.documentElement.getAttribute("data-theme");
+            const next = current === "dark" ? "light" : "dark";
+            document.documentElement.setAttribute("data-theme", next);
+            localStorage.setItem("theme", next);
+            themeToggle.textContent = next === "dark" ? "☀️" : "🌙";
+        });
+
+        // ── Subject management ────────────────────────────────────────
+        function loadSubjects() {
+            const select = document.getElementById("subject");
+            select.innerHTML = "";
+
+            const defaultSubjects = ["physics", "chemistry", "mathematics", "biology"];
+            const savedSubjects = JSON.parse(localStorage.getItem("subjects")) || [];
+            const allSubjects = [...new Set([...defaultSubjects, ...savedSubjects])];
+
+            const placeholder = document.createElement("option");
+            placeholder.value = "";
+            placeholder.textContent = "Select a subject...";
+            select.appendChild(placeholder);
+
+            allSubjects.forEach(sub => {
+                const option = document.createElement("option");
+                option.value = sub.toLowerCase();
+                option.textContent = sub.charAt(0).toUpperCase() + sub.slice(1);
+                select.appendChild(option);
+            });
+
+            const customOption = document.createElement("option");
+            customOption.value = "custom";
+            customOption.textContent = "+ Add New Subject";
+            select.appendChild(customOption);
+        }
+
+        function toggleCustomSubject(selectElement) {
+            const customContainer = document.getElementById("custom-subject-container");
+            customContainer.style.display = (selectElement.value === "custom") ? "block" : "none";
+            if (selectElement.value === "custom") {
+                document.getElementById("custom-subject").focus();
+            }
+        }
+
+        // ── Upload handler ────────────────────────────────────────────
+        function handleUpload(event) {
+            event.preventDefault();
+
+            const selectElement = document.getElementById("subject");
+            const selectedValue = selectElement.value;
+            const customSubjectInput = document.getElementById("custom-subject");
+            const progressContainer = document.getElementById("progress-container");
+            const progressBar = document.getElementById("progress-bar");
+            const statusBox = document.getElementById("upload-status");
+            const submitBtn = document.getElementById("submit-btn");
+            const btnText = document.getElementById("btn-text");
+
+            let subject = selectedValue;
+            if (selectedValue === "custom") {
+                subject = customSubjectInput.value.trim();
+                if (!subject) {
+                    showStatus("Please enter a custom subject name!", "error");
+                    return;
+                }
+                const savedSubjects = JSON.parse(localStorage.getItem("subjects")) || [];
+                if (!savedSubjects.includes(subject.toLowerCase())) {
+                    savedSubjects.push(subject.toLowerCase());
+                    localStorage.setItem("subjects", JSON.stringify(savedSubjects));
+                }
+                loadSubjects();
+                document.getElementById("subject").value = subject.toLowerCase();
+                customSubjectInput.value = "";
+                document.getElementById("custom-subject-container").style.display = "none";
+            }
+
+            const fileInput = document.getElementById("file");
+            if (!fileInput.files.length) {
+                showStatus("Please choose a PDF file!", "error");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append("subject", subject);
+            formData.append("file", fileInput.files[0]);
+
+            progressContainer.style.display = "block";
+            progressBar.style.width = "0%";
+            statusBox.style.display = "none";
+            submitBtn.disabled = true;
+            btnText.innerHTML = '<span class="spinner"></span> Uploading...';
+
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", "/upload", true);
+
+            xhr.upload.onprogress = function (event) {
+                if (event.lengthComputable) {
+                    const percent = Math.round((event.loaded / event.total) * 100);
+                    progressBar.style.width = percent + "%";
+                }
+            };
+
+            xhr.onload = function () {
+                submitBtn.disabled = false;
+                btnText.textContent = "Upload Document";
+                if (xhr.status === 200) {
+                    progressBar.style.width = "100%";
+                    const response = JSON.parse(xhr.responseText);
+                    showStatus(`✅ "${response.filename}" uploaded successfully under "${response.subject}"!`, "success");
+                    setTimeout(() => { progressContainer.style.display = "none"; }, 3000);
+                } else {
+                    progressBar.style.width = "0%";
+                    showStatus("Upload failed. Please try again.", "error");
+                }
+            };
+
+            xhr.onerror = function () {
+                submitBtn.disabled = false;
+                btnText.textContent = "Upload Document";
+                progressBar.style.width = "0%";
+                showStatus("Network error during upload!", "error");
+            };
+
+            xhr.send(formData);
+        }
+
+        function showStatus(message, type) {
+            const statusBox = document.getElementById("upload-status");
+            statusBox.textContent = message;
+            statusBox.className = `status-message status-${type}`;
+            statusBox.style.display = "block";
+        }
+
+        window.onload = loadSubjects;
+    </script>
+</body>
+</html>

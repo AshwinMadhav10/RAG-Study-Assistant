@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartStudy RAG Assistant – Query</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="header-inner">
+            <span class="logo">📚 SmartStudy RAG Assistant</span>
+            <button class="theme-toggle" id="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="card">
+            <h1>Ask Your Study Assistant</h1>
+            <p class="subtitle">Select a subject and ask any question from your uploaded documents.</p>
+
+            <form onsubmit="handleQuery(event)">
+                <label for="subject">Subject</label>
+                <select id="subject" name="subject">
+                    <!-- Populated by JS -->
+                </select>
+
+                <label for="query">Your Question</label>
+                <textarea id="query" name="user_query" placeholder="What would you like to know?" rows="4" aria-required="true"></textarea>
+
+                <button type="submit" id="submit-btn">
+                    <span id="btn-text">Ask Question</span>
+                </button>
+            </form>
+
+            <div id="answer" class="answer-box" style="display: none;"></div>
+
+            <!-- Recent query history -->
+            <div id="history-section" class="history-section" style="display: none;">
+                <div class="history-header">
+                    <span>🕑 Recent Queries</span>
+                    <button class="btn-clear-history" onclick="clearHistory()">Clear</button>
+                </div>
+                <ul id="history-list" class="history-list"></ul>
+            </div>
+
+            <a href="/" class="nav-link">&larr; Back to Upload</a>
+        </div>
+    </div>
+
+    <footer class="site-footer">
+        <p>Built with FastAPI · Groq · ChromaDB · HuggingFace · LangChain</p>
+    </footer>
+
+    <script>
+        // ── Theme toggle ──────────────────────────────────────────────
+        const themeToggle = document.getElementById("theme-toggle");
+        const savedTheme = localStorage.getItem("theme") || "light";
+        document.documentElement.setAttribute("data-theme", savedTheme);
+        themeToggle.textContent = savedTheme === "dark" ? "☀️" : "🌙";
+
+        themeToggle.addEventListener("click", () => {
+            const current = document.documentElement.getAttribute("data-theme");
+            const next = current === "dark" ? "light" : "dark";
+            document.documentElement.setAttribute("data-theme", next);
+            localStorage.setItem("theme", next);
+            themeToggle.textContent = next === "dark" ? "☀️" : "🌙";
+        });
+
+        // ── Subject management ────────────────────────────────────────
+        function loadSubjects() {
+            const subjectSelect = document.getElementById("subject");
+            subjectSelect.innerHTML = "";
+
+            const defaultSubjects = ["physics", "chemistry", "mathematics", "biology"];
+            const savedSubjects = JSON.parse(localStorage.getItem("subjects")) || [];
+            const allSubjects = [...new Set([...defaultSubjects, ...savedSubjects])];
+
+            const placeholder = document.createElement("option");
+            placeholder.value = "";
+            placeholder.textContent = "Select a subject...";
+            subjectSelect.appendChild(placeholder);
+
+            allSubjects.forEach(sub => {
+                const option = document.createElement("option");
+                option.value = sub.toLowerCase();
+                option.textContent = sub.charAt(0).toUpperCase() + sub.slice(1);
+                subjectSelect.appendChild(option);
+            });
+        }
+
+        // ── Query history ─────────────────────────────────────────────
+        function loadHistory() {
+            const history = JSON.parse(localStorage.getItem("queryHistory")) || [];
+            const section = document.getElementById("history-section");
+            const list = document.getElementById("history-list");
+
+            if (!history.length) {
+                section.style.display = "none";
+                return;
+            }
+
+            list.innerHTML = "";
+            history.slice(-5).reverse().forEach(item => {
+                const li = document.createElement("li");
+                li.textContent = `[${item.subject}] ${item.query}`;
+                li.title = "Click to reuse";
+                li.onclick = () => {
+                    document.getElementById("subject").value = item.subject;
+                    document.getElementById("query").value = item.query;
+                };
+                list.appendChild(li);
+            });
+            section.style.display = "block";
+        }
+
+        function saveToHistory(subject, query) {
+            const history = JSON.parse(localStorage.getItem("queryHistory")) || [];
+            history.push({ subject, query });
+            if (history.length > 20) history.shift();
+            localStorage.setItem("queryHistory", JSON.stringify(history));
+            loadHistory();
+        }
+
+        function clearHistory() {
+            localStorage.removeItem("queryHistory");
+            loadHistory();
+        }
+
+        // ── Query handler ─────────────────────────────────────────────
+        async function handleQuery(event) {
+            event.preventDefault();
+
+            const subject = document.getElementById("subject").value.trim();
+            const userQuery = document.getElementById("query").value.trim();
+            const answerBox = document.getElementById("answer");
+            const submitBtn = document.getElementById("submit-btn");
+            const btnText = document.getElementById("btn-text");
+
+            if (!subject) {
+                alert("Please select a subject!");
+                return;
+            }
+            if (!userQuery) {
+                alert("Please enter a question!");
+                return;
+            }
+
+            submitBtn.disabled = true;
+            btnText.innerHTML = '<span class="spinner"></span> Thinking...';
+            answerBox.style.display = "block";
+            answerBox.innerHTML = "<em>Analyzing documents…</em>";
+
+            try {
+                const formData = new FormData();
+                formData.append("subject", subject);
+                formData.append("user_query", userQuery);
+
+                const response = await fetch("/query", {
+                    method: "POST",
+                    body: formData,
+                });
+
+                if (!response.ok) {
+                    throw new Error("Server error: " + response.status);
+                }
+
+                const data = await response.json();
+                answerBox.innerHTML = `
+                    <h3>Answer:</h3>
+                    <div class="answer-content">${data.response}</div>
+                `;
+                saveToHistory(subject, userQuery);
+            } catch (error) {
+                console.error(error);
+                answerBox.innerHTML = `<p style="color:var(--error-color);">Error: ${error.message}</p>`;
+            } finally {
+                submitBtn.disabled = false;
+                btnText.textContent = "Ask Question";
+            }
+        }
+
+        window.onload = () => {
+            loadSubjects();
+            loadHistory();
+        };
+    </script>
+</body>
+</html>
